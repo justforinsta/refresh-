@@ -1,83 +1,163 @@
 import streamlit as st
 import requests
 import time
+from datetime import datetime, timedelta
 
 # ---------------------
 # CONSTANTS
 # ---------------------
-REASON_CODE = "2"  # Self Injury
+REASONS = {
+    "Violence": "5",
+    "Self Injury": "2",
+    "Impersonation (@)": "8",
+    "Scam or Fraud": "6",
+    "Sales of Illegal Drugs": "3"
+}
+
+WEB_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    'Accept': '*/*',
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Referer': 'https://www.instagram.com/accounts/login/',
+}
 
 # ---------------------
-# HELPER FUNCTIONS
+# FUNCTIONS
 # ---------------------
-def get_user_id(username, sessionid):
+def login_instagram(username, password):
+    session = requests.Session()
     try:
-        r = requests.get(
-            f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}",
+        session.get('https://www.instagram.com/accounts/login/', headers=WEB_HEADERS)
+        csrf_token = session.cookies.get_dict().get('csrftoken')
+
+        data = {
+            'username': username,
+            'enc_password': f'#PWD_INSTAGRAM_BROWSER:0:&:{password}',
+            'queryParams': {},
+            'optIntoOneTap': 'false'
+        }
+
+        headers = WEB_HEADERS.copy()
+        headers['X-CSRFToken'] = csrf_token
+
+        resp = session.post(
+            'https://www.instagram.com/accounts/login/ajax/',
+            data=data,
+            headers=headers
+        )
+
+        j = resp.json()
+        if j.get('authenticated'):
+            cookies = session.cookies.get_dict()
+            return session, cookies.get('sessionid'), cookies.get('csrftoken'), None
+        elif 'checkpoint_url' in j:
+            return None, None, None, "Checkpoint required. Login from browser first."
+        else:
+            return None, None, None, j.get("message", "Login failed.")
+    except Exception as e:
+        return None, None, None, str(e)
+
+def get_user_id(username, session):
+    try:
+        resp = session.get(
+            f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}",
             headers={
-                "User-Agent": "Instagram 155.0.0.37.107",
-                "Cookie": f"sessionid={sessionid};",
+                "User-Agent": "Mozilla/5.0",
+                "Cookie": f"sessionid={session.cookies.get('sessionid')}",
             }
         )
-        return r.json()["data"]["user"]["id"]
+        return resp.json()["data"]["user"]["id"]
     except:
         return None
 
-def send_report(user_id, sessionid, csrftoken):
-    res = requests.post(
-        f"https://i.instagram.com/users/{user_id}/flag/",
-        headers={
-            "User-Agent": "Mozilla/5.0",
-            "Host": "i.instagram.com",
-            "cookie": f"sessionid={sessionid}",
-            "X-CSRFToken": csrftoken,
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
-        },
-        data=f'source_name=&reason_id={REASON_CODE}&frx_context=',
-        allow_redirects=False
-    )
-    return res.status_code
+def send_report(user_id, session, csrf_token, reason_id):
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "X-CSRFToken": csrf_token,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Cookie": f"sessionid={session.cookies.get('sessionid')}; csrftoken={csrf_token};",
+    }
+
+    data = f"source_name=&reason_id={reason_id}&frx_context="
+    try:
+        r = session.post(f"https://www.instagram.com/users/{user_id}/flag/", headers=headers, data=data)
+        return r.status_code
+    except Exception as e:
+        return str(e)
 
 # ---------------------
 # STREAMLIT UI
 # ---------------------
-st.set_page_config(page_title="Instagram Reporter", layout="centered")
-st.title("📢 Instagram Self Injury Reporter")
+st.set_page_config(page_title="Instagram Web Reporter", layout="centered")
+st.title("⏰ Instagram Web Reporter (Scheduled Start)")
 
-with st.form("report_form"):
-    session_id = st.text_input("🔐 Instagram Session ID", type="password")
-    csrf_token = st.text_input("🔑 CSRF Token", type="password")
-    targets = st.text_area("🎯 Target Usernames (comma-separated)")
-    report_count = st.number_input("🔁 Reports per target", min_value=1, max_value=100, value=5)
-    delay = st.slider("⏱️ Delay between reports (seconds)", min_value=1, max_value=30, value=5)
-    submit = st.form_submit_button("🚀 Start Reporting")
+with st.form("login_form"):
+    st.subheader("🔐 Login with Instagram Web")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    submitted = st.form_submit_button("Login")
 
-if submit:
-    if not session_id or not csrf_token or not targets:
-        st.error("⚠️ Please fill in all required fields.")
+if submitted:
+    session, sessionid, csrf_token, error = login_instagram(username, password)
+    if session:
+        st.success("✅ Logged in successfully.")
+        st.session_state.session = session
+        st.session_state.csrf = csrf_token
+        st.session_state.logged_in = True
     else:
-        usernames = [u.strip() for u in targets.split(",") if u.strip()]
-        st.info(f"Starting reports for {len(usernames)} user(s)...")
-        report_log = st.empty()
-        log_lines = []
+        st.error(f"❌ Login failed: {error}")
+
+if st.session_state.get("logged_in"):
+    with st.form("report_form"):
+        st.subheader("🕒 Schedule Report at Specific Time")
+        target_usernames = st.text_area("Usernames (comma-separated)")
+        selected_reason = st.selectbox("Reason for report", list(REASONS.keys()))
+        report_count = st.slider("Reports per user", 1, 20, 5)
+        delay = st.slider("Delay between reports (seconds)", 1, 10, 3)
+
+        scheduled_hour = st.selectbox("Hour (24h format)", list(range(0, 24)), index=0)
+        scheduled_minute = st.selectbox("Minute", list(range(0, 60, 5)), index=0)
+
+        start_schedule = st.form_submit_button("📅 Schedule Reports")
+
+    if start_schedule:
+        now = datetime.now()
+        scheduled_time = now.replace(hour=scheduled_hour, minute=scheduled_minute, second=0, microsecond=0)
+        if scheduled_time <= now:
+            scheduled_time += timedelta(days=1)
+
+        wait_seconds = (scheduled_time - now).total_seconds()
+        st.info(f"⏳ Waiting until {scheduled_time.strftime('%Y-%m-%d %H:%M:%S')} to start...")
+
+        if wait_seconds > 300:
+            st.warning("⚠️ Long delays may not work on Streamlit Cloud. Run locally for best results.")
+            time.sleep(3)
+        else:
+            time.sleep(wait_seconds)
+
+        usernames = [u.strip() for u in target_usernames.split(",") if u.strip()]
+        reason_id = REASONS[selected_reason]
+        log_area = st.empty()
+        logs = []
 
         for username in usernames:
-            user_id = get_user_id(username, session_id)
+            user_id = get_user_id(username, st.session_state.session)
             if not user_id:
-                log_lines.append(f"❌ @{username} not found.")
-                report_log.text("\n".join(log_lines))
+                logs.append(f"❌ @{username} not found.")
+                log_area.text("\n".join(logs))
                 continue
 
             for i in range(1, report_count + 1):
-                code = send_report(user_id, session_id, csrf_token)
+                code = send_report(user_id, st.session_state.session, st.session_state.csrf, reason_id)
                 if code in [200, 302]:
-                    log_lines.append(f"✅ @{username} report {i}/{report_count} (Self Injury)")
+                    logs.append(f"✅ @{username} report {i}/{report_count}")
                 elif code == 429:
-                    log_lines.append(f"🚫 @{username} rate limited.")
+                    logs.append(f"⛔ @{username} rate limited.")
                     break
                 else:
-                    log_lines.append(f"⚠️ @{username} unknown response: {code}")
-                report_log.text("\n".join(log_lines))
+                    logs.append(f"⚠️ @{username} failed with status: {code}")
+                log_area.text("\n".join(logs))
                 time.sleep(delay)
 
-        st.success("🎉 Reporting complete!")
+        st.success("✅ All scheduled reports completed.")
