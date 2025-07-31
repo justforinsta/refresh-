@@ -1,3 +1,5 @@
 streamlit
 instagrapi
 python-dotenv 
+selenium
+undetected-chromedriver
