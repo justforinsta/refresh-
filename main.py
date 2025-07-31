@@ -3,7 +3,6 @@ import time
 import random
 import re
 from instagrapi import Client
-from instagrapi.exceptions import ClientError
 from datetime import datetime
 
 def validate_username(username):
@@ -35,8 +34,18 @@ def parse_targets(input_string):
 
 def setup_client_with_session(csrf_token, session_id):
     cl = Client()
-    cl.sessionid = session_id
-    cl.csrf_token = csrf_token
+
+    cookies = {
+        "sessionid": session_id,
+        "csrftoken": csrf_token,
+        "ds_user_id": "1234567890",  # optional placeholder
+        "ig_did": cl.generate_uuid(),
+        "rur": "FRC",
+        "mid": cl.generate_uuid(),
+    }
+
+    cl._session.cookies.update(cookies)
+
     try:
         cl.get_timeline_feed()
         return cl
@@ -49,21 +58,25 @@ def report_user(cl, target_username, reporter):
         user_id = cl.user_id_from_username(target_username)
         st.info(f"Simulating report: @{reporter} ➜ @{target_username}")
         time.sleep(random.uniform(1, 2))
-        # Real call (commented for safety)
-        # cl.report_user(user_id, reason="Impersonation")
+        # Simulated: cl.report_user(user_id, reason="Impersonation")
         return True
     except Exception as e:
-        st.warning(f"Failed report @{target_username} by @{reporter}: {str(e)}")
+        st.warning(f"Failed to report @{target_username} by @{reporter}: {str(e)}")
         return False
 
 # Streamlit UI
 st.set_page_config(page_title="Instagram Report Tool", layout="centered")
-st.title("📣 Instagram Reporting Tool via Session ID")
+st.title("📣 Instagram Reporting Tool via Session ID (Simulated)")
 
 with st.form("report_form"):
-    session_input = st.text_area("Enter accounts (username:csrf_token:session_id)", height=150,
-                                 help="Example: user1:csrf123:sessionid123,user2:csrf456:sessionid456")
-    targets_input = st.text_input("Target usernames (comma-separated)", help="Example: spamuser1,scammer2")
+    session_input = st.text_area(
+        "Enter accounts (username:csrf_token:session_id)", height=150,
+        help="Example: user1:csrf123:sessionid123,user2:csrf456:sessionid456"
+    )
+    targets_input = st.text_input(
+        "Target usernames (comma-separated)",
+        help="Example: scamuser1,fakeprofile2"
+    )
     submitted = st.form_submit_button("🚀 Start Reporting")
 
 if submitted:
