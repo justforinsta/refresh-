@@ -1,87 +1,109 @@
 import streamlit as st
-import requests
+import os
 import time
+import random
+import re
+from dotenv import load_dotenv
+from instagrapi import Client
+from instagrapi.exceptions import ClientError, LoginRequired
+from datetime import datetime
 
-st.set_page_config(page_title="Instagram Reporter", layout="centered")
-st.title("📢 Instagram Auto Reporter")
+load_dotenv()
 
-st.markdown("#### 🔐 Enter your Instagram session details")
-sessionid = st.text_input("Session ID", type="password")
-csrftoken = st.text_input("CSRF Token", type="password")
+def validate_username(username):
+    return bool(username and re.match(r'^[A-Za-z0-9._]{1,30}$', username))
 
-st.markdown("#### 👤 Usernames to report (one per line)")
-usernames_input = st.text_area("Enter usernames", placeholder="user1\nuser2\nuser3")
+def parse_credentials(input_string):
+    accounts = []
+    for cred in input_string.split(","):
+        cred = cred.strip()
+        if ":" not in cred:
+            st.error(f"Invalid credential format: {cred}. Use username:password")
+            continue
+        username, password = cred.split(":", 1)
+        if not validate_username(username.strip()):
+            st.error(f"Invalid username format: {username}")
+            continue
+        accounts.append({"username": username.strip(), "password": password.strip()})
+    return accounts
 
-report_reason = st.selectbox("🚨 Select reason for reporting", {
-    "Nudity or sexual activity": "1",
-    "Spam": "2",
-    "Hate speech or symbols": "5",
-    "Violence or dangerous organizations": "6",
-    "Scam or fraud": "8"
-})
+def parse_targets(input_string):
+    targets = [t.strip() for t in input_string.split(",") if validate_username(t.strip())]
+    if not targets:
+        st.error("No valid target usernames provided.")
+    return targets
 
-# ✅ FIXED: Uses proper headers to fetch user ID reliably
-def get_user_id(username, sessionid, csrftoken):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "X-IG-App-ID": "936619743392459",  # Instagram Web App ID
-        "X-Requested-With": "XMLHttpRequest",
-        "Referer": f"https://www.instagram.com/{username}/",
-        "Cookie": f"sessionid={sessionid}; csrftoken={csrftoken};"
-    }
-    url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
-    res = requests.get(url, headers=headers)
+def setup_client(proxy=None):
+    cl = Client()
+    if proxy:
+        cl.set_proxy(proxy)
+    return cl
 
-    if res.status_code == 200:
-        try:
-            return res.json()["data"]["user"]["id"]
-        except Exception as e:
-            return None
-    else:
-        return None
+def login_client(cl, username, password):
+    try:
+        cl.login(username, password)
+        csrf_token = cl.last_json.get("csrf_token", "N/A")
+        session_id = cl.get_settings().get("sessionid", "N/A")
+        return True, csrf_token, session_id
+    except (ClientError, LoginRequired) as e:
+        st.error(f"Login failed for {username}: {str(e)}")
+        return False, None, None
 
-# 🚨 Send the actual report
-def report_user(user_id, sessionid, csrftoken, reason_code):
-    url = f"https://www.instagram.com/users/{user_id}/report/"
-    headers = {
-        "User-Agent": "Instagram 275.0.0.27.107 Android",
-        "X-CSRFToken": csrftoken,
-        "Cookie": f"sessionid={sessionid}; csrftoken={csrftoken};",
-    }
-    data = {"reason": reason_code}
-    res = requests.post(url, headers=headers, data=data)
-    return res.status_code
+def report_user(cl, target_username, reporting_username, csrf_token, session_id, reason="Impersonation"):
+    try:
+        user_id = cl.user_id_from_username(target_username)
+        # Simulated report
+        time.sleep(random.uniform(1, 2))
+        return True
+    except Exception as e:
+        st.warning(f"Report failed for {target_username} by {reporting_username}: {str(e)}")
+        return False
 
-# 🚀 Run the report
-if st.button("🚨 Report Now"):
-    if not sessionid or not csrftoken:
-        st.error("Please enter valid session details.")
-    elif not usernames_input.strip():
-        st.error("Please enter at least one username.")
-    else:
-        usernames = [u.strip() for u in usernames_input.strip().split("\n") if u.strip()]
-        with st.spinner("Sending reports..."):
-            results = []
-            for username in usernames:
-                try:
-                    user_id = get_user_id(username, sessionid, csrftoken)
-                    if user_id:
-                        status = report_user(user_id, sessionid, csrftoken, report_reason)
-                        if status == 200:
-                            results.append(f"✅ Reported @{username} successfully.")
-                        elif status == 403:
-                            results.append(f"❌ Forbidden: Invalid or expired session for @{username}.")
-                        elif status == 429:
-                            results.append(f"❗ Rate limited while reporting @{username}.")
-                        else:
-                            results.append(f"⚠️ Failed to report @{username}. Status: {status}")
-                    else:
-                        results.append(f"❌ Could not fetch ID for @{username} — username might be wrong or blocked.")
-                    time.sleep(2)
-                except Exception as e:
-                    results.append(f"⚠️ Error for @{username}: {str(e)}")
-            st.success("✅ Reporting complete.")
-            for res in results:
-                st.write(res)
+st.set_page_config(page_title="Instagram Report Tool", layout="centered")
+
+st.title("📣 Instagram Impersonation Reporter (Simulated)")
+
+with st.form("input_form"):
+    creds_input = st.text_area("Enter accounts (username:password, comma-separated)", height=100)
+    targets_input = st.text_input("Enter targets to report (comma-separated usernames)")
+    submit = st.form_submit_button("Start Reporting")
+
+if submit:
+    with st.spinner("Processing..."):
+        accounts = parse_credentials(creds_input)
+        targets = parse_targets(targets_input)
+        proxy = os.getenv("PROXY_URL")
+        session_info = []
+        report_results = []
+
+        for acc in accounts:
+            cl = setup_client(proxy)
+            success, csrf, sid = login_client(cl, acc["username"], acc["password"])
+            if not success:
+                continue
+            session_info.append({
+                "username": acc["username"],
+                "csrf_token": csrf[:10] + "...",
+                "session_id": sid[:10] + "..."
+            })
+
+            for target in targets:
+                status = report_user(cl, target, acc["username"], csrf, sid)
+                report_results.append({
+                    "target": target,
+                    "reporter": acc["username"],
+                    "status": "✅ Success" if status else "❌ Failed",
+                    "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
+                time.sleep(random.uniform(3, 6))  # Simulate delay
+            cl.logout()
+
+        if session_info:
+            st.subheader("🔐 Session Info")
+            st.table(session_info)
+
+        if report_results:
+            st.subheader("📊 Report Status")
+            st.table(report_results)
+        else:
+            st.error("No reports were generated.")
