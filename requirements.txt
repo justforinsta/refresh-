@@ -3,3 +3,4 @@ instagrapi
 python-dotenv 
 selenium
 undetected-chromedriver
+distutils
