@@ -20,17 +20,29 @@ report_reason = st.selectbox("🚨 Select reason for reporting", {
     "Scam or fraud": "8"
 })
 
+# ✅ FIXED: Uses proper headers to fetch user ID reliably
 def get_user_id(username, sessionid, csrftoken):
     headers = {
-        "User-Agent": "Mozilla/5.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "X-IG-App-ID": "936619743392459",  # Instagram Web App ID
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": f"https://www.instagram.com/{username}/",
         "Cookie": f"sessionid={sessionid}; csrftoken={csrftoken};"
     }
     url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
     res = requests.get(url, headers=headers)
-    if res.status_code == 200:
-        return res.json()["data"]["user"]["id"]
-    return None
 
+    if res.status_code == 200:
+        try:
+            return res.json()["data"]["user"]["id"]
+        except Exception as e:
+            return None
+    else:
+        return None
+
+# 🚨 Send the actual report
 def report_user(user_id, sessionid, csrftoken, reason_code):
     url = f"https://www.instagram.com/users/{user_id}/report/"
     headers = {
@@ -42,6 +54,7 @@ def report_user(user_id, sessionid, csrftoken, reason_code):
     res = requests.post(url, headers=headers, data=data)
     return res.status_code
 
+# 🚀 Run the report
 if st.button("🚨 Report Now"):
     if not sessionid or not csrftoken:
         st.error("Please enter valid session details.")
@@ -59,16 +72,16 @@ if st.button("🚨 Report Now"):
                         if status == 200:
                             results.append(f"✅ Reported @{username} successfully.")
                         elif status == 403:
-                            results.append(f"❌ Forbidden: Check session for @{username}.")
+                            results.append(f"❌ Forbidden: Invalid or expired session for @{username}.")
                         elif status == 429:
                             results.append(f"❗ Rate limited while reporting @{username}.")
                         else:
-                            results.append(f"⚠️ Failed to report @{username}. Status code: {status}")
+                            results.append(f"⚠️ Failed to report @{username}. Status: {status}")
                     else:
-                        results.append(f"❌ Could not fetch ID for @{username}")
-                    time.sleep(2)  # to prevent rate-limiting
+                        results.append(f"❌ Could not fetch ID for @{username} — username might be wrong or blocked.")
+                    time.sleep(2)
                 except Exception as e:
                     results.append(f"⚠️ Error for @{username}: {str(e)}")
-            st.success("Reporting complete.")
+            st.success("✅ Reporting complete.")
             for res in results:
                 st.write(res)
