@@ -5,11 +5,11 @@ import re
 from instagrapi import Client
 from datetime import datetime
 
-# ✅ Validate a proper Instagram username
+# ✅ Validate username
 def validate_username(username):
     return bool(username and re.match(r'^[A-Za-z0-9._]{1,30}$', username))
 
-# ✅ Parse session strings like username:csrf:sessionid
+# ✅ Parse session format: username:csrf_token:session_id
 def parse_sessions(input_string):
     accounts = []
     for entry in input_string.split(","):
@@ -28,54 +28,55 @@ def parse_sessions(input_string):
         })
     return accounts
 
-# ✅ Parse targets
+# ✅ Parse target usernames
 def parse_targets(input_string):
     targets = [t.strip() for t in input_string.split(",") if validate_username(t.strip())]
     if not targets:
         st.warning("No valid targets found.")
     return targets
 
-# ✅ Set cookies safely using _session (compatible with instagrapi 1.17+)
+# ✅ Safe session loader (no _session, no private, works in latest instagrapi)
 def setup_client_with_session(csrf_token, session_id):
     cl = Client()
-    cl.delay_range = [1, 2]
+    
+    cl.set_settings({
+        "authorization_data": {
+            "sessionid": session_id,
+            "csrftoken": csrf_token
+        }
+    })
 
     try:
-        # Access cookie jar directly through the requests session
-        cl._session.cookies.set("sessionid", session_id, domain=".instagram.com")
-        cl._session.cookies.set("csrftoken", csrf_token, domain=".instagram.com")
-
-        # Check if session is working
         cl.get_timeline_feed()
         return cl
     except Exception as e:
         st.error(f"Session invalid or expired: {e}")
         return None
 
-# ✅ Simulate reporting a user
+# ✅ Simulated report
 def report_user(cl, target_username, reporter):
     try:
         user_id = cl.user_id_from_username(target_username)
         st.info(f"Simulated report: @{reporter} ➜ @{target_username}")
-        time.sleep(random.uniform(1, 2))  # Simulate realistic delay
-        # Real call would be: cl.report_user(user_id, reason="Impersonation")
+        time.sleep(random.uniform(1, 2))  # Simulate delay
+        # cl.report_user(user_id, reason="Impersonation")  # <-- real call
         return True
     except Exception as e:
         st.warning(f"Failed report @{target_username} by @{reporter}: {str(e)}")
         return False
 
 # ✅ Streamlit UI
-st.set_page_config(page_title="Instagram Session Reporter", layout="centered")
-st.title("📣 Instagram Report Tool (via Session ID) [Simulated]")
+st.set_page_config(page_title="Instagram Reporter via Session", layout="centered")
+st.title("📣 Instagram Report Tool (Session Login) — Simulated")
 
 with st.form("report_form"):
     session_input = st.text_area(
-        "Enter accounts (username:csrf_token:session_id)", height=150,
+        "Enter sessions (username:csrf_token:session_id)", height=150,
         help="Example: user1:csrf123:sessionid123,user2:csrf456:sessionid456"
     )
     targets_input = st.text_input(
-        "Target usernames (comma-separated)",
-        help="Example: spamuser1,fakeprofile2"
+        "Enter target usernames (comma-separated)",
+        help="Example: scammer1,fakeprofile2"
     )
     submitted = st.form_submit_button("🚀 Start Reporting")
 
@@ -104,4 +105,4 @@ if submitted:
             st.subheader("📊 Report Summary")
             st.table(report_results)
         else:
-            st.error("No reports completed. Check sessions or usernames.")
+            st.error("No reports completed. Check sessions or targets.")
