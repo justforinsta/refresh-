@@ -1,5 +1,4 @@
 import streamlit as st
-import os
 import time
 import random
 import re
@@ -11,7 +10,6 @@ def validate_username(username):
     return bool(username and re.match(r'^[A-Za-z0-9._]{1,30}$', username))
 
 def parse_sessions(input_string):
-    """Format: username:csrf_token:sessionid,username2:csrf:sessionid2"""
     accounts = []
     for entry in input_string.split(","):
         parts = entry.strip().split(":")
@@ -19,7 +17,7 @@ def parse_sessions(input_string):
             st.warning(f"Invalid session format: {entry}")
             continue
         username, csrf_token, session_id = parts
-        if not validate_username(username):
+        if not validate_username(username.strip()):
             st.warning(f"Invalid username: {username}")
             continue
         accounts.append({
@@ -35,35 +33,41 @@ def parse_targets(input_string):
         st.warning("No valid target usernames provided.")
     return targets
 
-def setup_client_from_session(csrf_token, session_id):
+def setup_client_with_session(csrf_token, session_id):
     cl = Client()
-    session = {
+    settings = {
         "authorization_data": {
             "sessionid": session_id,
-            "csrf_token": csrf_token
+            "csrftoken": csrf_token
         }
     }
-    cl.set_settings(session)
-    return cl
+    cl.set_settings(settings)
+    cl.set_uuids()
+    try:
+        cl.get_timeline_feed()  # Validate session is working
+        return cl
+    except Exception as e:
+        st.error(f"Session invalid or expired: {e}")
+        return None
 
 def report_user(cl, target_username, reporter):
     try:
         user_id = cl.user_id_from_username(target_username)
-        # Simulated report
+        st.info(f"Simulating report of @{target_username} by @{reporter}")
         time.sleep(random.uniform(1, 2))
+        # Uncomment to report for real: cl.report_user(user_id, reason="Impersonation")
         return True
     except Exception as e:
         st.warning(f"Report failed for {target_username} by {reporter}: {str(e)}")
         return False
 
 st.set_page_config(page_title="Instagram Session Reporter", layout="centered")
-
-st.title("🔐 Report via Instagram Session (Simulated)")
+st.title("🔐 Instagram Report Tool using Session ID (Simulated)")
 
 with st.form("session_form"):
     session_input = st.text_area("Enter sessions (username:csrf_token:sessionid)", height=150,
-                                 help="Example: user1:csrf123:sessionid123,user2:csrf456:sessionid456")
-    targets_input = st.text_input("Enter targets to report (comma-separated usernames)")
+                                 help="Format: user1:csrf123:sessionid123,user2:csrf456:sessionid456")
+    targets_input = st.text_input("Enter target usernames (comma-separated)")
     submitted = st.form_submit_button("Start Reporting")
 
 if submitted:
@@ -73,7 +77,9 @@ if submitted:
         report_results = []
 
         for acc in accounts:
-            cl = setup_client_from_session(acc["csrf_token"], acc["session_id"])
+            cl = setup_client_with_session(acc["csrf_token"], acc["session_id"])
+            if not cl:
+                continue  # Skip if session invalid
 
             for target in targets:
                 status = report_user(cl, target, acc["username"])
@@ -83,10 +89,10 @@ if submitted:
                     "status": "✅ Success" if status else "❌ Failed",
                     "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
-                time.sleep(random.uniform(2, 5))
+                time.sleep(random.uniform(2, 4))
 
         if report_results:
             st.subheader("📊 Report Summary")
             st.table(report_results)
         else:
-            st.error("No reports could be generated.")
+            st.error("⚠️ No reports were generated. Check your session IDs and tokens.")
